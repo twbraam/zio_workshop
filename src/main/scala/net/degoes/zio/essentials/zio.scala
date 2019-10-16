@@ -3,8 +3,8 @@
 package net.degoes.zio
 package essentials
 
-import java.io.{File, IOException}
-import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
+import java.io.{ File, IOException }
+import java.util.concurrent.{ Executors, ScheduledExecutorService, TimeUnit }
 
 import zio._
 import zio.internal.PlatformLive
@@ -95,8 +95,8 @@ object zio_types {
    * the (lazily evaluated) specified value and ascribe the correct type.
    */
   lazy val bigList: List[FiberId] = (1L to 100000000L).toList
-  lazy val bigListString: String = bigList.mkString("\n")
-  val ioString: UIO[String] = ZIO.effectTotal(bigListString)
+  lazy val bigListString: String  = bigList.mkString("\n")
+  val ioString: UIO[String]       = ZIO.effectTotal(bigListString)
 
   /**
    * EXERCISE 3
@@ -318,7 +318,7 @@ object zio_operations {
   @scala.annotation.tailrec
   def factorialTailIO(n: Int, acc: Int = 1): UIO[Int] =
     if (n <= 1) IO.succeed(acc) // this step is executed last so all previous steps are being executed as a procedure?
-    else factorialTailIO(n -1, n * acc)
+    else factorialTailIO(n - 1, n * acc)
 
   /**
    * EXERCISE 8
@@ -365,9 +365,9 @@ object zio_operations {
 
   val nameAsk2: Task[String] =
     for {
-    _    <- Task.effect(println("What is your name?"))
-    name <- Task.effect(scala.io.StdIn.readLine())
-    _    <- Task.effect(println(s"Hello, $name"))
+      _    <- Task.effect(println("What is your name?"))
+      name <- Task.effect(scala.io.StdIn.readLine())
+      _    <- Task.effect(println(s"Hello, $name"))
     } yield name
 
   /**
@@ -384,8 +384,8 @@ object zio_operations {
 
   val ageAsk2: Task[Int] =
     Task
-    .effect(println("What is your age?"))
-    .flatMap(_ => Task.effect(scala.io.StdIn.readLine()).flatMap(name => Task.fromTry(scala.util.Try(name.toInt))))
+      .effect(println("What is your age?"))
+      .flatMap(_ => Task.effect(scala.io.StdIn.readLine()).flatMap(name => Task.fromTry(scala.util.Try(name.toInt))))
 
   /**
    * EXERCISE 14
@@ -412,14 +412,15 @@ object zio_operations {
   }
 
   lazy val playGame2: Task[Unit] = for {
-    rand  <- Task.effect(scala.util.Random.nextInt(5))
-    _     <- Task.effect(println("Enter a number between 0 - 5: "))
-    result <- Task.effect(scala.io.StdIn.readLine())
-      .flatMap(_ => retry)
-      .flatMap { input =>
-        if (input == rand) Task.effect(println("You guessed right! The number was " + rand))
-        else Task.effect(println("You guessed wrong! The number was " + rand))
-      }
+    rand <- Task.effect(scala.util.Random.nextInt(5))
+    _    <- Task.effect(println("Enter a number between 0 - 5: "))
+    result <- Task
+               .effect(scala.io.StdIn.readLine())
+               .flatMap(_ => retry)
+               .flatMap { input =>
+                 if (input == rand) Task.effect(println("You guessed right! The number was " + rand))
+                 else Task.effect(println("You guessed wrong! The number was " + rand))
+               }
   } yield result
 }
 
@@ -432,7 +433,7 @@ object zio_failure {
    * represents a failure with a string error message, containing
    * a user-readable description of the failure.
    */
-  val stringFailure: IO[String, Int] = ???
+  val stringFailure: IO[String, Int] = IO.fail("Oh noes")
 
   /**
    * EXERCISE 2
@@ -445,7 +446,9 @@ object zio_failure {
     else a(i)
 
   def accessArr2[A](i: Int, a: Array[A]): IO[IndexOutOfBoundsException, A] =
-    ???
+    if (i < 0 || i >= a.length)
+      IO.fail(new IndexOutOfBoundsException)
+    else IO.succeed(a(i))
 
   /**
    * EXERCISE 3
@@ -455,7 +458,8 @@ object zio_failure {
    */
   def divide(n: Int, d: Int): IO[ArithmeticException, Int] =
     if (d == 0) IO.fail(new ArithmeticException("Cannot divide by 0")) else IO.succeed(n / d)
-  val recovered1: UIO[Option[Int]] = divide(100, 0) ?
+  val recovered1: UIO[Option[Int]] = divide(100, 0)
+    .fold(_ => None, n => Some(n))
 
   /**
    * EXERCISE 4
@@ -464,21 +468,28 @@ object zio_failure {
    */
   def printError(err: String): UIO[Unit] = UIO(println(err))
   def printDivision(int: Int): UIO[Unit] = UIO(println("Division is: " + int))
-  val recovered2: UIO[Unit]              = ???
+  val recovered2: UIO[Unit] = divide(100, 0)
+    .fold(e => printError(e.getMessage), n => printDivision(n))
 
   /**
    * EXERCISE 5
    *
    * Using `ZIO#either`, recover from division by zero error by returning -1.
    */
-  val recovered3: UIO[Int] = divide(100, 0) ?
+  val recovered3: UIO[Int] = divide(100, 0).either.map {
+    case Right(n) => n
+    case _        => -1
+  }
 
   /**
    * EXERCISE 6
    *
    * Using `ZIO#option`, recover from division by zero by returning -1.
    */
-  val recovered4: UIO[Int] = divide(100, 0) ?
+  val recovered4: UIO[Int] = divide(100, 0).option.map {
+    case Some(n) => n
+    case _       => -1
+  }
 
   /**
    * EXERCISE 7
@@ -488,14 +499,14 @@ object zio_failure {
    */
   val firstChoice: IO[ArithmeticException, Int] = divide(100, 0)
   val secondChoice: UIO[Int]                    = IO.succeed(-1)
-  val combined: UIO[Int]                        = ???
+  val combined: UIO[Int]                        = firstChoice orElse secondChoice
 
   /**
    * EXERCISE 8
    *
    * Using `ZIO#catchAll`, recover from an error.
    */
-  val caughtAll: UIO[Int] = divide(100, 0) ?
+  val caughtAll: UIO[Int] = divide(100, 0).catchAll(_ => secondChoice)
 
   /**
    * EXERCISE 9
@@ -507,14 +518,14 @@ object zio_failure {
     if (input == "") IO.fail(EmptyStringError)
     else IO.effect(input.toInt)
   }
-  val caughtSome = readNumber ?
+  val caughtSome: Task[Int] = readNumber catchSome { case EmptyStringError => secondChoice }
 
   /**
    * EXERCISE 10
    *
    * Using `IO.effectTotal`, import code that is really not total.
    */
-  val defect1: UIO[Int] = "this is a short text".charAt(30) ?
+  val defect1: UIO[Int] = IO.effectTotal("this is a short text".charAt(30))
 
   /**
    * EXERCISE 11
@@ -522,7 +533,17 @@ object zio_failure {
    * Using `ZIO#sandbox`, recover from the defect `defect1`.
    *
    */
-  val caught1: UIO[Int] = defect1 ?
+  val caught1: UIO[Int] = defect1.sandbox.catchAll {
+    case Cause.Die(_: StringIndexOutOfBoundsException) =>
+      // Caught defect: Out of bounds!
+      IO.succeed(-1)
+    case Cause.Fail(e) =>
+      // Caught error: DomainError!
+      IO.succeed(-1)
+    case cause =>
+      // Caught unknown defects, shouldn't recover!
+      IO.halt(cause)
+  }
 
   /**
    * EXERCISE 12
@@ -531,7 +552,9 @@ object zio_failure {
    * specified file into an empty list.
    */
   def readFile(file: File): UIO[List[String]] =
-    Task(Source.fromFile(file).getLines.toList) ?
+    Task(Source.fromFile(file).getLines.toList).catchAll {
+      case _: Exception => UIO.succeed(List[String]())
+    }
 
 }
 
@@ -664,7 +687,7 @@ object zio_interop extends DefaultRuntime {
  * ZIO's version of try / finally, try-with-resources.
  */
 object zio_resources {
-  import java.io.{File, FileInputStream}
+  import java.io.{ File, FileInputStream }
   class InputStream private (is: FileInputStream) {
     def read: IO[Exception, Option[Byte]] =
       IO.effectTotal(is.read).map(i => if (i < 0) None else Some(i.toByte))
