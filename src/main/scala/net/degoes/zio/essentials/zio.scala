@@ -3,8 +3,8 @@
 package net.degoes.zio
 package essentials
 
-import java.io.{ File, IOException }
-import java.util.concurrent.{ Executors, ScheduledExecutorService, TimeUnit }
+import java.io.{File, FileInputStream, IOException}
+import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 
 import zio._
 import zio.internal.PlatformLive
@@ -573,13 +573,21 @@ object impure_to_pure {
     }
   }
   def getName2[E](print: String => IO[E, Unit], read: IO[E, String]): IO[E, Option[String]] =
-    ???
+    for {
+      _ <- print("Do you want to enter your name?")
+      name <- read
+        .flatMap { answer =>
+          if (answer == "y") read.map(answer => Some(answer))
+          else UIO(None)
+      }
+    } yield name
 
   /**
    * EXERCISE 2
    *
    * Translate the following procedural program into ZIO.
    */
+  @scala.annotation.tailrec
   def ageExplainer1(): Unit = {
     println("What is your age?")
     scala.util.Try(scala.io.StdIn.readLine().toInt).toOption match {
@@ -598,7 +606,19 @@ object impure_to_pure {
     }
   }
 
-  def ageExplainer2: UIO[Unit] = ???
+  def ageExplainer2: UIO[Unit] =
+    IO(println("What is your age?")).flatMap{ _ =>
+      IO(scala.io.StdIn.readInt()).option.flatMap {
+        case None => IO(println("That's not an age, try again")).flatMap(_ => ageExplainer2)
+        case Some(age) if age < 12 => IO(println("You are a kid"))
+        case Some(age) if age < 20 => IO(println("You are a teenager"))
+        case Some(age) if age < 30 => IO(println("You are a grownup"))
+        case Some(age) if age < 50 => IO(println("You are an adult"))
+        case Some(age) if age < 80 => IO(println("You are a mature adult"))
+        case Some(age) if age < 100 => IO(println("You are elderly"))
+        case _ => IO(println("You are probably lying."))
+    }} catchAll(_ => UIO(println("Error, I'm dying yo")))
+
 
   /**
    * EXERCISE 3
@@ -617,7 +637,16 @@ object impure_to_pure {
       )
     }
   }
-  def decode2[E](read: IO[E, Byte]): IO[E, Either[Byte, Int]] = ???
+  def decode2[E](read: IO[E, Byte]): IO[E, Either[Byte, Int]] =
+    read.flatMap {
+      case b if b < 0 => ZIO(Left(b)).refineToOrDie[E]
+      case b => for {
+        bee <- ZIO(b.toInt).refineToOrDie[E]
+        one <- read.map(x => x.toInt << 8)
+        two <- read.map(x => x.toInt << 16)
+        three <- read.map(x => x.toInt << 24)
+      } yield Right(bee + one + two + three)
+    }
 }
 
 object zio_interop extends DefaultRuntime {
@@ -631,15 +660,15 @@ object zio_interop extends DefaultRuntime {
    * Using `Fiber#toFuture`, convert the following `Fiber` into a `Future`.
    */
   val fiber: Fiber[Throwable, Int] = Fiber.succeed(1)
-  val fToFuture: UIO[Future[Int]]  = ???
+  val fToFuture: UIO[Future[Int]]  = fiber.toFuture
 
   /**
    * EXERCISE 2
    *
    * Using `Fiber.fromFuture`, convert the following `Future` into a `Fiber`.
    */
-  lazy val future1                     = Future(Thread.sleep(1000))(global)
-  val fToFiber: Fiber[Throwable, Unit] = ???
+  lazy val future1: Future[Unit] = Future(Thread.sleep(1000))(global)
+  val fToFiber: Fiber[Throwable, Unit] = Fiber.fromFuture(future1)
 
   /**
    * EXERCISE 3
@@ -647,7 +676,7 @@ object zio_interop extends DefaultRuntime {
    * Using `Task#toFuture`, unsafely convert the following `Task` into `Future`.
    */
   val task1: Task[Int]       = IO.effect("wrong".toInt)
-  val tToFuture: Future[Int] = task1 ?
+  val tToFuture: Future[Int] = new DefaultRuntime{}.unsafeRun(task1.toFuture)
 
   /**
    * EXERCISE 4
@@ -655,8 +684,8 @@ object zio_interop extends DefaultRuntime {
    * Use `Task.fromFuture` to convert the following Scala `Future` into a
    * ZIO `Task`.
    */
-  lazy val future2        = Future.successful("Hello World")
-  val task2: Task[String] = ???
+  lazy val future2: Future[String] = Future.successful("Hello World")
+  val task2: Task[String] = Task.fromFuture(_ => future2)
 
   /**
    * EXERCISE 5
@@ -664,7 +693,7 @@ object zio_interop extends DefaultRuntime {
    * Use `Task.fromTry` to convert the `Try` into a ZIO `Task`.
    */
   val tryValue  = scala.util.Failure(new Throwable("Uh oh"))
-  val tryEffect = ZIO.fromTry(???)
+  val tryEffect: Task[Nothing] = ZIO.fromTry(tryValue)
 
   /**
    * EXERCISE 6
@@ -672,7 +701,7 @@ object zio_interop extends DefaultRuntime {
    * Use `IO.fromOption` to convert the `Option` into a ZIO `IO`.
    */
   val optionValue  = Some("foo")
-  val optionEffect = ZIO.fromOption(???)
+  val optionEffect: IO[Unit, String] = ZIO.fromOption(optionValue)
 
   /**
    * EXERCISE 7
@@ -680,7 +709,7 @@ object zio_interop extends DefaultRuntime {
    * Use `IO.fromEither` to convert the `Either` into a ZIO `IO`.
    */
   val eitherValue  = Right("foo")
-  val eitherEffect = ZIO.fromEither(???)
+  val eitherEffect: IO[Nothing, String] = ZIO.fromEither(eitherValue)
 }
 
 /**
@@ -742,7 +771,9 @@ object zio_resources {
       throw new Exception("Boom!")
     } finally i -= 1
 
-  val noChange2: Task[Unit] = ???
+  val noChange2: Task[Unit] = Task(i += 1).flatMap(_ =>
+    Task.fail(new Exception("Boom!")))
+    .ensuring(UIO.effectTotal(i -= 1))
 
   /**
    * EXERCISE 2
@@ -753,8 +784,10 @@ object zio_resources {
   def tryCatch1(): Unit =
     try throw new Exception("Uh oh")
     finally println("On the way out...")
+
   val tryCatch2: Task[Unit] =
-    ???
+    Task.fail(new Exception("Uh oh"))
+      .ensuring(UIO.effectTotal(println("On the way out...")))
 
   /**
    * EXERCISE 3
@@ -776,14 +809,26 @@ object zio_resources {
     } yield bytes
   }
 
-  def readFile2(file: File): IO[Exception, List[Byte]] = ???
+  def readFile2(file: File): IO[Exception, List[Byte]] = {
+    def readAll(is: InputStream, acc: List[Byte]): IO[Exception, List[Byte]] =
+      is.read.flatMap {
+        case None       => IO.succeed(acc.reverse)
+        case Some(byte) => readAll(is, byte :: acc)
+      }
+
+    InputStream.openFile(file)
+      .bracket(_.close orElse Task.unit){ stream =>
+        readAll(stream, Nil)
+    }
+  }
 
   /**
    * EXERCISE 4
    *
    * Implement the `tryCatchFinally` method using `bracket` or `ensuring`.
    */
-  def tryCatchFinally[E, A](try0: IO[E, A])(catch0: PartialFunction[E, IO[E, A]])(finally0: UIO[Unit]): IO[E, A] = ???
+  def tryCatchFinally[E, A](try0: IO[E, A])(catch0: PartialFunction[E, IO[E, A]])(finally0: UIO[Unit]): IO[E, A] =
+    try0 catchSome catch0 ensuring finally0
 
   /**
    * EXERCISE 5
@@ -802,7 +847,15 @@ object zio_resources {
       case e: java.io.IOException => Nil
     } finally if (fis != null) fis.close()
   }
-  def readFileTCF2(file: File): Task[List[Byte]] = ???
+
+  def readFileTCF2(file: File): Task[List[Byte]] = {
+    IO.effectTotal(new FileInputStream(file)).bracket(x => IO.effectTotal(x.close())) { fis =>
+      for {
+        arr <- IO(Array.ofDim[Byte](file.length.toInt))
+        _ <- IO(fis.read(arr))
+      } yield arr.toList
+    }
+  }
 
   /**
    *`Managed[E, A]` is a managed resource of type `A`, which may be used by
@@ -817,7 +870,7 @@ object zio_resources {
    * for a `FileInputStream`.
    */
   def managedFile(file: File): Managed[Throwable, FileInputStream] =
-    ???
+    Managed.make(IO.effect(new FileInputStream(file)))(f => IO.effectTotal(f.close()))
 
   /**
    * EXERCISE 7
@@ -827,7 +880,10 @@ object zio_resources {
    */
   def readFileTCF3(file: File): Task[List[Byte]] =
     managedFile(file).use { inputStream =>
-      ???
+      for {
+        arr <- IO(Array.ofDim[Byte](file.length.toInt))
+        _ <- IO(inputStream.read(arr))
+      } yield arr.toList
     }
 }
 
