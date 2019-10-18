@@ -3,13 +3,16 @@
 package net.degoes.zio
 package essentials
 
-import java.io.{File, FileInputStream, IOException}
+import java.io.{File, IOException}
 import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 
 import zio._
+import zio.clock.Clock
 import zio.internal.PlatformLive
+import zio.random.Random
 
 import scala.io.Source
+import scala.reflect.ClassTag
 
 /**
  * `ZIO[R, E, A]` is an immutable data structure that models an effect, which
@@ -537,7 +540,7 @@ object zio_failure {
     case Cause.Die(_: StringIndexOutOfBoundsException) =>
       // Caught defect: Out of bounds!
       IO.succeed(-1)
-    case Cause.Fail(e) =>
+    case Cause.Fail(_) =>
       // Caught error: DomainError!
       IO.succeed(-1)
     case cause =>
@@ -637,7 +640,7 @@ object impure_to_pure {
       )
     }
   }
-  def decode2[E](read: IO[E, Byte]): IO[E, Either[Byte, Int]] =
+  def decode2[E: ClassTag](read: IO[E, Byte]): IO[E, Either[Byte, Int]] =
     read.flatMap {
       case b if b < 0 => ZIO(Left(b)).refineToOrDie[E]
       case b => for {
@@ -844,7 +847,7 @@ object zio_resources {
       fis.read(array)
       array.toList
     } catch {
-      case e: java.io.IOException => Nil
+      case _: java.io.IOException => Nil
     } finally if (fis != null) fis.close()
   }
 
@@ -888,6 +891,7 @@ object zio_resources {
 }
 
 object zio_environment {
+
   import zio.console.Console
 
   /**
@@ -906,15 +910,15 @@ object zio_environment {
    * Write the type of a program that requires `scalaz.zio.clock.Clock` and which
    * could fail with `E` or succeed with `A`.
    */
-  type ClockIO[E, A] = ???
+  type ClockIO[E, A] = ZIO[Clock, E, A]
 
   /**
    * EXERCISE 2
    *
    * Write the type of a program that requires `scalaz.zio.console.Console` and
-   * which could fail with `E` or succeed with A`:
+   * which could fail with `E` or succeed with `A`:
    */
-  type ConsoleIO[E, A] = ???
+  type ConsoleIO[E, A] = ZIO[Console, E, A]
 
   /**
    * EXERCISE 3
@@ -922,7 +926,7 @@ object zio_environment {
    * Write the type of a program that requires `scalaz.zio.system.System` and
    * which could fail with E or succeed with A:
    */
-  type SystemIO[E, A] = ???
+  type SystemIO[E, A] = ZIO[System, E, A]
 
   /**
    * EXERCISE 4
@@ -930,7 +934,7 @@ object zio_environment {
    * Write the type of a program that requires `scalaz.zio.random.Random` and
    * which could fail with `E` or succeed with `A`:
    */
-  type RandomIO[E, A] = ???
+  type RandomIO[E, A] = ZIO[Random, E, A]
 
   /**
    * EXERCISE 5
@@ -938,7 +942,7 @@ object zio_environment {
    * Write the type of a program that requires `Clock` and `System` and which
    * could fail with `E` or succeed with `A`:
    */
-  type ClockWithSystemIO[E, A] = ???
+  type ClockWithSystemIO[E, A] = ZIO[Clock with System, E, A]
 
   /**
    * EXERCISE 6
@@ -946,7 +950,7 @@ object zio_environment {
    * Write the type of a program that requires `Console` and `System` and
    * which could fail with `E` or succeed with `A`:
    */
-  type ConsoleWithSystemIO[E, A] = ???
+  type ConsoleWithSystemIO[E, A] = ZIO[Console with System, E, A]
 
   /**
    * EXERCISE 7
@@ -954,7 +958,7 @@ object zio_environment {
    * Write the type of a program that requires `Clock`, `System` and `Random`
    * and which could fail with `E` or succeed with `A`:
    */
-  type ClockWithSystemWithRandom[E, A] = ???
+  type ClockWithSystemWithRandom[E, A] = ZIO[Clock with System with Random, E, A]
 
   /**
    * EXERCISE 8
@@ -962,7 +966,7 @@ object zio_environment {
    * Write the type of a program that requires `Clock`, `Console`, `System` and
    * `Random` and which could fail with `E` or succeed with `A`:
    */
-  type ClockWithConsoleWithSystemWithRandom[E, A] = ???
+  type ClockWithConsoleWithSystemWithRandom[E, A] = ZIO[Clock with Console with System, E, A]
 
   /**
    * EXERCISE 9
@@ -970,7 +974,15 @@ object zio_environment {
    * Using `zio.console.putStrLn`, write a hello world program, and identify
    * the correct ZIO type to use.
    */
-  val helloWorld: ZIO[???, ???, ???] = ???
+  val helloWorld: RIO[Console, Unit] = RIO {
+    for {
+      _ <- zio.console.putStrLn("Hello world")
+    } yield ()
+  }
+
+  val helloWorld2: RIO[Console, Unit] = RIO {
+    zio.console.putStrLn("Hello world").flatMap(_ => RIO.succeed())
+  }
 
   /**
    * EXERCISE 10
@@ -978,7 +990,12 @@ object zio_environment {
    * Using `zio.console.getStrLn` and `zio.console.putStrLn`, create an
    * interactive program and identify the correct ZIO type to use.
    */
-  def interactiveProgram: ZIO[???, ???, ???] = ???
+  def interactiveProgram: RIO[Console, Unit] = {
+    for {
+      input <- zio.console.getStrLn
+      _ <- zio.console.putStrLn(input)
+    } yield ()
+  }
 
   /**
    * EXERCISE 11
@@ -986,7 +1003,14 @@ object zio_environment {
    * In a for comprehension, call various methods in zio.clock._, zio.console._,
    * and zio.random._, and identify the composite return type.
    */
-  val program = ???
+  val program: RIO[Console with Clock with Random, Unit] = {
+    for {
+      time <- zio.clock.nanoTime
+      _ <- zio.console.putStrLn("Current time: " + time)
+      rand <- zio.random.nextInt
+      _ <- zio.console.putStrLn("Random number: " + rand)
+    } yield ()
+  }
 
   /**
    * Build a new Service called `Configuration`
@@ -1002,10 +1026,11 @@ object zio_environment {
    * Build a `Config` module that has a reference to a `Config.Service` trait.
    */
   trait Config {
-    val config: ???
+    val config: Config.Service
   }
 
   object Config {
+
     // Service: definition of the methods provided by module:
     trait Service {
       val port: UIO[Int]
@@ -1018,9 +1043,14 @@ object zio_environment {
      * Implement a production version of the `Config` module.
      */
     trait Live extends Config {
-      val config: ??? = ???
+      val config: Config.Service = new Service {
+        val port: UIO[Int] = UIO.succeed(80)
+        val host: UIO[String] = UIO.succeed("130.123.124.76")
+      }
     }
+
     object Live extends Live
+
   }
 
   /**
@@ -1030,8 +1060,8 @@ object zio_environment {
    * and delegate to the functions inside the `Config` service.
    */
   object helpers {
-    val port: ZIO[Config, Nothing, Int]    = ???
-    val host: ZIO[Config, Nothing, String] = ???
+    val port: URIO[Config, Int] = URIO.accessM { c: Config => c.config.port }
+    val host: URIO[Config, String] = URIO.accessM { c: Config => c.config.host }
   }
 
   /**
@@ -1040,7 +1070,11 @@ object zio_environment {
    * Write a program that depends on `Config` and `Console` and use the Scala
    * compiler to infer the correct type.
    */
-  val configProgram: ZIO[???, ???, ???] = ???
+  val configProgram: URIO[Config with Console, Unit] = for {
+    p <- helpers.port
+    h <- helpers.host
+    _ <- zio.console.putStrLn(h + ":" + p)
+  } yield ()
 
   /**
    * EXERCISE 16
@@ -1048,7 +1082,7 @@ object zio_environment {
    * Give the `configProgram` its dependencies by supplying it with both `Config`
    * and `Console` modules, and determine the type of the resulting effect.
    */
-  val provided = configProgram.provide(???)
+  val provided: UIO[Unit] = configProgram.provide(new Config.Live with Console.Live)
 
   /**
    * EXERCISE 17
@@ -1057,7 +1091,7 @@ object zio_environment {
    * effect that has a dependency on `Config`:
    */
   val ConfigRuntime: Runtime[Config with Console] =
-    Runtime(??? : Config with Console, PlatformLive.Default)
+    Runtime(new Config.Live with Console.Live: Config with Console, PlatformLive.Default)
 
   /**
    * EXERCISE 18
@@ -1066,14 +1100,21 @@ object zio_environment {
    * Console that displays the port and host in the Console and fails
    * with a String if the host name contains `:`
    */
-  val simpleConfigProgram: ZIO[Config, String, Unit] = ???
+  val simpleConfigProgram: ZIO[Config with Console, String, Unit] =
+    for {
+      host <- helpers.host
+      _    <- helpers.port.flatMap { port =>
+        if (host.contains(":")) ZIO.fail("host contained ':'")
+        else zio.console.putStrLn(host + ":" + port)
+      }
+    } yield ()
 
   /**
    * EXERCISE 19
    *
    * Run the `simpleConfigProgram` using `ConfigRuntime.unsafeRun`.
    */
-  val run: ??? = simpleConfigProgram ?
+  val run: Unit = ConfigRuntime.unsafeRun(simpleConfigProgram)
 
   /**
    * Build a file system service
@@ -1094,7 +1135,11 @@ object zio_environment {
      *
      * Create a service defining the capabilities of a `FileSystem`.
      */
-    trait Service[R] {}
+    trait Service[R] {
+      def dir(d: String): ZIO[R, IOException, Array[File]]
+
+      def filePath(file: String): ZIO[R, IOException, String]
+    }
 
     /**
      * EXERCISE 22
@@ -1102,58 +1147,89 @@ object zio_environment {
      * Create a production implementation of the `FileSystem` module.
      */
     trait Live extends FileSystem with Console {
-      val filesystem: ??? = ???
+      val filesystem: FileSystem.Service[Any] = new Service[Any] {
+        def dir(d: String): ZIO[Any, IOException, Array[File]] = (for {
+          file <- ZIO(new File(d))
+          paths <- ZIO(file.listFiles())
+        } yield paths) refineOrDie {
+          case io: IOException => io
+        }
+
+        def filePath(fileName: String): ZIO[Any, IOException, String] = (for {
+          file <- ZIO(new File(fileName))
+          filePath <- ZIO(file.getAbsolutePath)
+        } yield filePath) refineOrDie {
+          case io: IOException => io
+        }
+      }
     }
-    object Live extends Live with Console.Live
+
+      object Live extends Live with Console.Live
+
+    }
+
+    /**
+     * EXERCISE 23
+     *
+     * Using `ZIO.accessM`, create helpers.
+     */
+    object fs extends FileSystem.Service[FileSystem] {
+      def dir(d: String): ZIO[FileSystem, IOException, Array[File]] =
+        ZIO.accessM {
+          _.filesystem.dir(d)
+        }
+
+      def filePath(fileName: String): ZIO[FileSystem, IOException, String] =
+        ZIO.accessM {
+          _.filesystem.filePath(fileName)
+        }
+    }
+
+    /**
+     * EXERCISE 24
+     *
+     * Write a simple program that uses `FileSystem with Console`.
+     */
+    val fileProgram: Task[ZIO[Console with FileSystem, IOException, Unit]] = ZIO {
+      for {
+        files <- fs.dir("..")
+        path <- fs.filePath("build.sbt")
+        _ <- URIO.accessM { c: Console => c.console.putStrLn(path) }
+      } yield ()
+    }
+
+    /**
+     * EXERCISE 25
+     *
+     * Create a `Runtime` that can execute effects that require
+     * `FileSystem with Console`.
+     */
+    val FSRuntime: Runtime[FileSystem with Console] =
+      Runtime(FileSystem.Live , PlatformLive.Default)
+
+    /**
+     * EXERCISE 26
+     *
+     * Execute `fileProgram` using `FSRuntime.unsafeRun`.
+     */
+    lazy val fileProgramLive: ??? = FSRuntime.unsafeRun(fileProgram)
+
+    /**
+     * EXERCISE 27
+     *
+     * Implement a mock file system module.
+     */
+    trait MockFileSystem extends FileSystem {
+      val filesystem = ???
+    }
+
+    /**
+     * EXERCISE 28
+     *
+     * Using `ZIO#provide` with the mock file system module, and a default
+     * runtime, execute `fileProgram`.
+     */
+    lazy val fileProgramTest: ??? = new DefaultRuntime {}.unsafeRun {
+      fileProgram.provide(???)
+    }
   }
-
-  /**
-   * EXERCISE 23
-   *
-   * Using `ZIO.accessM`, create helpers.
-   */
-  object fs extends FileSystem.Service[FileSystem] {}
-
-  /**
-   * EXERCISE 24
-   *
-   * Write a simple program that uses `FileSystem with Console`.
-   */
-  val fileProgram: ZIO[FileSystem with Console, ???, ???] =
-    ???
-
-  /**
-   * EXERCISE 25
-   *
-   * Create a `Runtime` that can execute effects that require
-   * `FileSystem with Console`.
-   */
-  val FSRuntime: Runtime[FileSystem with Console] =
-    ???
-
-  /**
-   * EXERCISE 26
-   *
-   * Execute `fileProgram` using `FSRuntime.unsafeRun`.
-   */
-  lazy val fileProgramLive: ??? = FSRuntime.unsafeRun(fileProgram)
-
-  /**
-   * EXERCISE 27
-   *
-   * Implement a mock file system module.
-   */
-  trait MockFileSystem extends FileSystem {
-    val filesystem = ???
-  }
-
-  /**
-   * EXERCISE 28
-   *
-   * Using `ZIO#provide` with the mock file system module, and a default
-   * runtime, execute `fileProgram`.
-   */
-  lazy val fileProgramTest: ??? = new DefaultRuntime {}.unsafeRun {
-    fileProgram.provide(???)
-  }
-}

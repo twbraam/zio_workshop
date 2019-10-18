@@ -5,4 +5,4 @@ project/.sbt
 .bloop
 .metals
 metals.lock.db
-
+.DS_Store
